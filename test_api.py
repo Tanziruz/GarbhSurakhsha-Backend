@@ -3,9 +3,16 @@ Test script to verify the API server is working correctly
 """
 import requests
 import json
+import sys
 from pathlib import Path
 
-BASE_URL = "https://garbhasurakhsha.up.railway.app"
+# Default to Railway deployment, but allow local testing
+if len(sys.argv) > 1 and sys.argv[1] == "local":
+    BASE_URL = "http://localhost:8000"
+    print("Testing LOCAL server")
+else:
+    BASE_URL = "https://garbhsurakhsha.up.railway.app"
+    print("Testing RAILWAY deployment")
 
 def test_health_check():
     """Test the health check endpoint"""
@@ -57,19 +64,74 @@ def test_analyze_audio(audio_file="a0001.wav", gestation_period="24 weeks"):
 
         if response.status_code == 200:
             result = response.json()
-            print("\n" + "="*60)
-            print("ANALYSIS RESULT")
-            print("="*60)
+            print("\n" + "="*70)
+            print("ANALYSIS RESULT - COMPLETE JSON RESPONSE")
+            print("="*70)
             print(f"Prediction: {result['predicted_label']}")
             print(f"Confidence: {result['confidence']:.2%}")
             print(f"Status: {result['status']}")
             print(f"\nMessage: {result['message']}")
             print(f"\nRecommendation: {result['recommendation']}")
+            
+            # Probabilities
             print(f"\nProbabilities:")
             for label, prob in result['probabilities'].items():
                 print(f"  {label}: {prob:.2%}")
+            
+            # Heart Rate Metrics
+            if 'heart_rate' in result:
+                print(f"\n{'='*70}")
+                print("HEART RATE ANALYSIS")
+                print("="*70)
+                hr = result['heart_rate']
+                if 'average_fhr' in hr:
+                    print(f"Average FHR: {hr['average_fhr']:.1f} bpm")
+                    print(f"Beat Count: {hr.get('beat_count', 'N/A')}")
+                    print(f"Mean FHR: {hr.get('mean_fhr', 'N/A'):.1f} bpm")
+                    print(f"Median FHR: {hr.get('median_fhr', 'N/A'):.1f} bpm")
+                    print(f"Min FHR: {hr.get('min_fhr', 'N/A'):.1f} bpm")
+                    print(f"Max FHR: {hr.get('max_fhr', 'N/A'):.1f} bpm")
+                    print(f"FHR Range: {hr.get('fhr_range', 'N/A'):.1f} bpm")
+                else:
+                    print(f"Error: {hr.get('error', 'Unknown error')}")
+            
+            # FHR Analysis with Probabilities
+            if 'fhr_analysis' in result:
+                print(f"\n{'='*70}")
+                print("FHR RISK ANALYSIS")
+                print("="*70)
+                fhr_a = result['fhr_analysis']
+                
+                print(f"Gestation: {fhr_a.get('gestation_weeks', 'N/A')} weeks")
+                print(f"Normal Range: {fhr_a.get('normal_range_min', 'N/A')}-{fhr_a.get('normal_range_max', 'N/A')} bpm")
+                print(f"Measured FHR: {fhr_a.get('measured_fhr', 'N/A'):.1f} bpm")
+                
+                print(f"\n🎯 PROBABILITY SCORES:")
+                print(f"  Normal Chance:      {fhr_a.get('normal_chance', 0):.2f}%")
+                print(f"  Bradycardia Chance: {fhr_a.get('bradycardia_chance', 0):.2f}%")
+                print(f"  Tachycardia Chance: {fhr_a.get('tachycardia_chance', 0):.2f}%")
+                
+                print(f"\n📊 STATUS:")
+                print(f"  FHR Status: {fhr_a.get('fhr_status', 'unknown').upper()}")
+                print(f"  Classification: {fhr_a.get('fhr_classification', 'N/A')}")
+                
+                print(f"\n⚠️ SEVERITY:")
+                print(f"  Severity: {fhr_a.get('severity', 'none').upper()}")
+                print(f"  Severity Level: {fhr_a.get('severity_level', 0)}/3")
+                print(f"  Description: {fhr_a.get('severity_description', 'N/A')}")
+                print(f"  Risk Level: {fhr_a.get('risk_level', 'N/A')}")
+                
+                if fhr_a.get('deviation', 0) != 0:
+                    print(f"\n📈 DEVIATION:")
+                    print(f"  Deviation: {fhr_a.get('deviation', 0):+.1f} bpm")
+                    print(f"  Deviation %: {fhr_a.get('deviation_percentage', 0):+.2f}%")
+                
+                print(f"\n🏥 MEDICAL:")
+                print(f"  Concern: {fhr_a.get('medical_concern', 'N/A')}")
+                print(f"  Urgency: {fhr_a.get('urgency', 'N/A')}")
+            
             print(f"\nGestation Period: {result['gestation_period']}")
-            print("="*60)
+            print("="*70)
             return True
         else:
             print(f"✗ Error response: {response.text}")

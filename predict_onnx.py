@@ -157,6 +157,241 @@ def get_beat_analysis(peaks, sr):
     }
 
 
+def parse_gestation_weeks(gestation_period):
+    """
+    Parse gestation period string to extract weeks
+    
+    Args:
+        gestation_period: String like "24 weeks", "32", "24w", etc.
+        
+    Returns:
+        Integer weeks or None if parsing fails
+    """
+    import re
+    if not gestation_period:
+        return None
+    
+    # Extract numbers from string
+    match = re.search(r'(\d+)', str(gestation_period))
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def get_fhr_normal_range(gestation_weeks):
+    """
+    Get normal FHR range based on gestation period
+    
+    Args:
+        gestation_weeks: Gestation period in weeks
+        
+    Returns:
+        Tuple of (min_fhr, max_fhr) or None if unknown
+    """
+    if gestation_weeks is None:
+        return None
+    
+    # FHR ranges by gestation period
+    if 5 <= gestation_weeks <= 7:
+        return (90, 130)
+    elif 8 <= gestation_weeks <= 10:
+        return (170, 180)
+    elif 11 <= gestation_weeks <= 13:
+        return (140, 160)
+    elif 14 <= gestation_weeks <= 27:
+        return (120, 160)
+    elif 28 <= gestation_weeks <= 32:
+        return (110, 160)
+    elif 33 <= gestation_weeks <= 40:
+        return (110, 150)
+    else:
+        # Outside typical range, use most common range
+        return (110, 160)
+
+
+def calculate_risk_probability(fhr, min_fhr, max_fhr):
+    """
+    Calculate risk probabilities for bradycardia and tachycardia
+    
+    Args:
+        fhr: Measured fetal heart rate
+        min_fhr: Minimum normal FHR
+        max_fhr: Maximum normal FHR
+        
+    Returns:
+        Dictionary with risk probabilities
+    """
+    range_width = max_fhr - min_fhr
+    midpoint = (min_fhr + max_fhr) / 2
+    
+    # Calculate probabilities using sigmoid-like functions
+    if fhr < min_fhr:
+        # Bradycardia probability increases as FHR decreases
+        deviation = min_fhr - fhr
+        bradycardia_chance = min(100.0, (deviation / 30.0) * 100)
+        bradycardia_chance = max(50.0, bradycardia_chance)  # At least 50% if below threshold
+        tachycardia_chance = max(0.0, 5.0 - deviation * 0.5)  # Very low
+        normal_chance = max(0.0, 100 - bradycardia_chance - tachycardia_chance)
+    elif fhr > max_fhr:
+        # Tachycardia probability increases as FHR increases
+        deviation = fhr - max_fhr
+        tachycardia_chance = min(100.0, (deviation / 30.0) * 100)
+        tachycardia_chance = max(50.0, tachycardia_chance)  # At least 50% if above threshold
+        bradycardia_chance = max(0.0, 5.0 - deviation * 0.5)  # Very low
+        normal_chance = max(0.0, 100 - tachycardia_chance - bradycardia_chance)
+    else:
+        # Normal range - calculate proximity to boundaries
+        distance_to_min = abs(fhr - min_fhr)
+        distance_to_max = abs(fhr - max_fhr)
+        distance_to_midpoint = abs(fhr - midpoint)
+        
+        # Normal chance is highest at midpoint
+        normal_chance = 100.0 - (distance_to_midpoint / range_width * 40)
+        normal_chance = max(60.0, min(100.0, normal_chance))
+        
+        # Small chances for abnormalities based on proximity to boundaries
+        bradycardia_chance = max(0.0, (1 - distance_to_min / range_width) * 20)
+        tachycardia_chance = max(0.0, (1 - distance_to_max / range_width) * 20)
+        
+        # Normalize to ensure they sum to 100
+        total = normal_chance + bradycardia_chance + tachycardia_chance
+        normal_chance = (normal_chance / total) * 100
+        bradycardia_chance = (bradycardia_chance / total) * 100
+        tachycardia_chance = (tachycardia_chance / total) * 100
+    
+    return {
+        'normal_chance': round(normal_chance, 2),
+        'bradycardia_chance': round(bradycardia_chance, 2),
+        'tachycardia_chance': round(tachycardia_chance, 2)
+    }
+
+
+def get_severity_details(severity, deviation):
+    """Get detailed severity information"""
+    severity_info = {
+        'mild': {
+            'level': 1,
+            'description': 'Slight deviation from normal range',
+            'urgency': 'Monitor closely, consult if persists',
+            'risk_level': 'Low to Moderate'
+        },
+        'moderate': {
+            'level': 2,
+            'description': 'Significant deviation from normal range',
+            'urgency': 'Medical consultation recommended soon',
+            'risk_level': 'Moderate to High'
+        },
+        'severe': {
+            'level': 3,
+            'description': 'Critical deviation from normal range',
+            'urgency': 'Immediate medical attention required',
+            'risk_level': 'High to Critical'
+        },
+        'none': {
+            'level': 0,
+            'description': 'Within normal range',
+            'urgency': 'Continue routine monitoring',
+            'risk_level': 'Low'
+        }
+    }
+    
+    return severity_info.get(severity, severity_info['none'])
+
+
+def analyze_fhr_status(fhr, gestation_period):
+    """
+    Analyze FHR and determine if it's normal, bradycardia, or tachycardia
+    with probability scores and detailed risk assessment
+    
+    Args:
+        fhr: Fetal heart rate in bpm
+        gestation_period: Gestation period string (e.g., "24 weeks")
+        
+    Returns:
+        Dictionary with comprehensive FHR status analysis including probabilities
+    """
+    weeks = parse_gestation_weeks(gestation_period)
+    normal_range = get_fhr_normal_range(weeks)
+    
+    if fhr is None or normal_range is None:
+        return {
+            'fhr_status': 'unknown',
+            'fhr_classification': 'Unable to determine',
+            'reason': 'Insufficient data for FHR analysis',
+            'normal_chance': 0,
+            'bradycardia_chance': 0,
+            'tachycardia_chance': 0
+        }
+    
+    min_fhr, max_fhr = normal_range
+    
+    # Calculate risk probabilities
+    risk_probs = calculate_risk_probability(fhr, min_fhr, max_fhr)
+    
+    result = {
+        'gestation_weeks': weeks,
+        'normal_range_min': min_fhr,
+        'normal_range_max': max_fhr,
+        'measured_fhr': fhr,
+        'normal_chance': risk_probs['normal_chance'],
+        'bradycardia_chance': risk_probs['bradycardia_chance'],
+        'tachycardia_chance': risk_probs['tachycardia_chance']
+    }
+    
+    if fhr < min_fhr:
+        severity = 'mild' if fhr >= min_fhr - 10 else 'moderate' if fhr >= min_fhr - 20 else 'severe'
+        severity_details = get_severity_details(severity, fhr - min_fhr)
+        
+        result.update({
+            'fhr_status': 'bradycardia',
+            'fhr_classification': 'Bradycardia (Low Heart Rate)',
+            'severity': severity,
+            'severity_level': severity_details['level'],
+            'severity_description': severity_details['description'],
+            'urgency': severity_details['urgency'],
+            'risk_level': severity_details['risk_level'],
+            'deviation': fhr - min_fhr,
+            'deviation_percentage': round(((min_fhr - fhr) / min_fhr) * 100, 2),
+            'medical_concern': 'Yes - Heart rate below normal range',
+            'recommendation': 'Immediate medical consultation recommended. Bradycardia may indicate fetal distress or conduction issues.'
+        })
+    elif fhr > max_fhr:
+        severity = 'mild' if fhr <= max_fhr + 10 else 'moderate' if fhr <= max_fhr + 20 else 'severe'
+        severity_details = get_severity_details(severity, fhr - max_fhr)
+        
+        result.update({
+            'fhr_status': 'tachycardia',
+            'fhr_classification': 'Tachycardia (High Heart Rate)',
+            'severity': severity,
+            'severity_level': severity_details['level'],
+            'severity_description': severity_details['description'],
+            'urgency': severity_details['urgency'],
+            'risk_level': severity_details['risk_level'],
+            'deviation': fhr - max_fhr,
+            'deviation_percentage': round(((fhr - max_fhr) / max_fhr) * 100, 2),
+            'medical_concern': 'Yes - Heart rate above normal range',
+            'recommendation': 'Medical consultation recommended. Tachycardia may indicate fetal stress, maternal fever, or other concerns.'
+        })
+    else:
+        severity_details = get_severity_details('none', 0)
+        
+        result.update({
+            'fhr_status': 'normal',
+            'fhr_classification': 'Normal Heart Rate',
+            'severity': 'none',
+            'severity_level': 0,
+            'severity_description': severity_details['description'],
+            'urgency': severity_details['urgency'],
+            'risk_level': severity_details['risk_level'],
+            'deviation': 0,
+            'deviation_percentage': 0,
+            'medical_concern': 'No',
+            'recommendation': 'Heart rate is within normal range for gestational age. Continue routine prenatal care.'
+        })
+    
+    return result
+
+
 # ============================================================================
 # ONNX Predictor Class
 # ============================================================================
@@ -242,13 +477,14 @@ class ONNXPredictor:
         
         return feature
     
-    def predict_file(self, audio_path, include_heart_analysis=True):
+    def predict_file(self, audio_path, include_heart_analysis=True, gestation_period=None):
         """
         Make prediction on a single audio file
         
         Args:
             audio_path: Path to audio file
             include_heart_analysis: Whether to include heart rate analysis
+            gestation_period: Gestation period string (e.g., "24 weeks") for FHR analysis
             
         Returns:
             Dictionary with prediction results and heart rate features
@@ -302,6 +538,11 @@ class ONNXPredictor:
                     heart_features = extract_heart_features(ibi)
                     if heart_features:
                         result['heart_rate'].update(heart_features)
+                    
+                    # Analyze FHR status based on gestation period
+                    if gestation_period:
+                        fhr_status = analyze_fhr_status(fhr, gestation_period)
+                        result['fhr_analysis'] = fhr_status
                     
                     # Add beat analysis (optional, can be large)
                     # beat_analysis = get_beat_analysis(peaks, sr)

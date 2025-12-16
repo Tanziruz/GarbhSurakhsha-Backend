@@ -106,27 +106,63 @@ async def analyze_audio(
         print(f"Processing audio: {audio_file.filename}")
         print(f"Gestation period: {gestation_period}")
 
-        # Run prediction with heart rate analysis
-        result = predictor.predict_file(temp_audio_path, include_heart_analysis=True)
+        # Run prediction with heart rate analysis and gestation period
+        result = predictor.predict_file(
+            temp_audio_path, 
+            include_heart_analysis=True,
+            gestation_period=gestation_period
+        )
 
         # Add gestation period to result
         result['gestation_period'] = gestation_period
         result['original_filename'] = audio_file.filename
 
-        # Determine status message
-        if result['predicted_label'] == 'Normal':
-            result['status'] = 'healthy'
+        # Determine status message based on both prediction and FHR analysis
+        base_status = 'healthy' if result['predicted_label'] == 'Normal' else 'abnormal'
+        
+        # Check FHR status if available
+        fhr_issue = None
+        if 'fhr_analysis' in result:
+            fhr_status = result['fhr_analysis'].get('fhr_status')
+            if fhr_status in ['bradycardia', 'tachycardia']:
+                fhr_issue = fhr_status
+                base_status = 'abnormal'
+        
+        result['status'] = base_status
+        
+        # Build comprehensive message and recommendation
+        if result['predicted_label'] == 'Normal' and not fhr_issue:
             result['message'] = 'Fetal heart sounds appear normal.'
             result['recommendation'] = 'Continue regular prenatal checkups.'
+        elif fhr_issue:
+            fhr_class = result['fhr_analysis'].get('fhr_classification', fhr_issue)
+            result['message'] = f'Alert: {fhr_class} detected. {result["fhr_analysis"].get("recommendation", "")}'
+            result['recommendation'] = result['fhr_analysis'].get('recommendation', 'Consult your healthcare provider.')
         else:
-            result['status'] = 'abnormal'
             result['message'] = 'Potential abnormality detected in fetal heart sounds.'
             result['recommendation'] = 'Please consult your healthcare provider immediately for further evaluation.'
 
         # Log prediction and heart rate
         print(f"[OK] Prediction: {result['predicted_label']} ({result['confidence']:.2%})")
         if 'heart_rate' in result and 'average_fhr' in result['heart_rate']:
-            print(f"[OK] Average FHR: {result['heart_rate']['average_fhr']:.1f} bpm")
+            fhr = result['heart_rate']['average_fhr']
+            print(f"[OK] Average FHR: {fhr:.1f} bpm")
+            
+            if 'fhr_analysis' in result:
+                fhr_stat = result['fhr_analysis'].get('fhr_status', 'unknown')
+                print(f"[OK] FHR Status: {fhr_stat}")
+                
+                # Log probability scores
+                if 'normal_chance' in result['fhr_analysis']:
+                    print(f"[OK] Probabilities - Normal: {result['fhr_analysis']['normal_chance']}%, "
+                          f"Bradycardia: {result['fhr_analysis']['bradycardia_chance']}%, "
+                          f"Tachycardia: {result['fhr_analysis']['tachycardia_chance']}%")
+                
+                # Log severity if abnormal
+                if fhr_stat in ['bradycardia', 'tachycardia']:
+                    severity = result['fhr_analysis'].get('severity', 'unknown')
+                    severity_level = result['fhr_analysis'].get('severity_level', 0)
+                    print(f"[OK] Severity: {severity} (Level {severity_level})")
 
         return JSONResponse(content=result)
 
