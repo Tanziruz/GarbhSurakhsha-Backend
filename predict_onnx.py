@@ -212,6 +212,7 @@ def get_fhr_normal_range(gestation_weeks):
 def calculate_risk_probability(fhr, min_fhr, max_fhr):
     """
     Calculate risk probabilities for bradycardia and tachycardia
+    Only show abnormal chances if deviation is >= 20 bpm
     
     Args:
         fhr: Measured fetal heart rate
@@ -221,43 +222,42 @@ def calculate_risk_probability(fhr, min_fhr, max_fhr):
     Returns:
         Dictionary with risk probabilities
     """
-    range_width = max_fhr - min_fhr
-    midpoint = (min_fhr + max_fhr) / 2
-    
-    # Calculate probabilities using sigmoid-like functions
+    # Calculate probabilities - only show risk if deviation >= 20 bpm
     if fhr < min_fhr:
-        # Bradycardia probability increases as FHR decreases
+        # Below normal range
         deviation = min_fhr - fhr
-        bradycardia_chance = min(100.0, (deviation / 30.0) * 100)
-        bradycardia_chance = max(50.0, bradycardia_chance)  # At least 50% if below threshold
-        tachycardia_chance = max(0.0, 5.0 - deviation * 0.5)  # Very low
-        normal_chance = max(0.0, 100 - bradycardia_chance - tachycardia_chance)
+        
+        if deviation < 20:
+            # Minor deviation - don't show bradycardia risk
+            bradycardia_chance = 0.0
+            tachycardia_chance = 0.0
+            normal_chance = 100.0
+        else:
+            # Significant deviation - show bradycardia risk
+            bradycardia_chance = min(100.0, ((deviation - 20) / 30.0) * 100 + 50)
+            tachycardia_chance = 0.0
+            normal_chance = max(0.0, 100 - bradycardia_chance)
+            
     elif fhr > max_fhr:
-        # Tachycardia probability increases as FHR increases
+        # Above normal range
         deviation = fhr - max_fhr
-        tachycardia_chance = min(100.0, (deviation / 30.0) * 100)
-        tachycardia_chance = max(50.0, tachycardia_chance)  # At least 50% if above threshold
-        bradycardia_chance = max(0.0, 5.0 - deviation * 0.5)  # Very low
-        normal_chance = max(0.0, 100 - tachycardia_chance - bradycardia_chance)
+        
+        if deviation < 20:
+            # Minor deviation - don't show tachycardia risk
+            bradycardia_chance = 0.0
+            tachycardia_chance = 0.0
+            normal_chance = 100.0
+        else:
+            # Significant deviation - show tachycardia risk
+            tachycardia_chance = min(100.0, ((deviation - 20) / 30.0) * 100 + 50)
+            bradycardia_chance = 0.0
+            normal_chance = max(0.0, 100 - tachycardia_chance)
+            
     else:
-        # Normal range - calculate proximity to boundaries
-        distance_to_min = abs(fhr - min_fhr)
-        distance_to_max = abs(fhr - max_fhr)
-        distance_to_midpoint = abs(fhr - midpoint)
-        
-        # Normal chance is highest at midpoint
-        normal_chance = 100.0 - (distance_to_midpoint / range_width * 40)
-        normal_chance = max(60.0, min(100.0, normal_chance))
-        
-        # Small chances for abnormalities based on proximity to boundaries
-        bradycardia_chance = max(0.0, (1 - distance_to_min / range_width) * 20)
-        tachycardia_chance = max(0.0, (1 - distance_to_max / range_width) * 20)
-        
-        # Normalize to ensure they sum to 100
-        total = normal_chance + bradycardia_chance + tachycardia_chance
-        normal_chance = (normal_chance / total) * 100
-        bradycardia_chance = (bradycardia_chance / total) * 100
-        tachycardia_chance = (tachycardia_chance / total) * 100
+        # Within normal range - no risk
+        normal_chance = 100.0
+        bradycardia_chance = 0.0
+        tachycardia_chance = 0.0
     
     return {
         'normal_chance': round(normal_chance, 2),
