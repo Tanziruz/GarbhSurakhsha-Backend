@@ -106,8 +106,8 @@ async def analyze_audio(
         print(f"Processing audio: {audio_file.filename}")
         print(f"Gestation period: {gestation_period}")
 
-        # Run prediction
-        result = predictor.predict_file(temp_audio_path)
+        # Run prediction with heart rate analysis
+        result = predictor.predict_file(temp_audio_path, include_heart_analysis=True)
 
         # Add gestation period to result
         result['gestation_period'] = gestation_period
@@ -123,7 +123,10 @@ async def analyze_audio(
             result['message'] = 'Potential abnormality detected in fetal heart sounds.'
             result['recommendation'] = 'Please consult your healthcare provider immediately for further evaluation.'
 
+        # Log prediction and heart rate
         print(f"[OK] Prediction: {result['predicted_label']} ({result['confidence']:.2%})")
+        if 'heart_rate' in result and 'average_fhr' in result['heart_rate']:
+            print(f"[OK] Average FHR: {result['heart_rate']['average_fhr']:.1f} bpm")
 
         return JSONResponse(content=result)
 

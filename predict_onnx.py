@@ -11,7 +11,8 @@ import pandas as pd
 from pathlib import Path
 import librosa
 import soundfile
-from scipy.signal import butter, lfilter
+from scipy.signal import butter, lfilter, hilbert, find_peaks
+from scipy.stats import skew
 
 EPS = 1E-8
 
@@ -74,6 +75,86 @@ def standard_normal_variate(data):
     mean = np.mean(data)
     std = np.std(data)
     return (data - mean) / (std + EPS)
+
+
+# ============================================================================
+# Heart Rate Feature Extraction Functions
+# ============================================================================
+
+def extract_envelope(signal_data):
+    """Extract envelope using Hilbert transform"""
+    analytic_signal = hilbert(signal_data)
+    return np.abs(analytic_signal)
+
+
+def detect_peaks(envelope, sr):
+    """Detect peaks in envelope signal"""
+    min_distance = int(0.3 * sr)  # ~300 ms minimum distance between peaks
+    peaks, _ = find_peaks(
+        envelope,
+        distance=min_distance,
+        height=np.mean(envelope)
+    )
+    return peaks
+
+
+def compute_fhr(peaks, sr):
+    """Compute Fetal Heart Rate from detected peaks"""
+    times = peaks / sr
+    ibi = np.diff(times)
+
+    if len(ibi) < 3:
+        return None, None
+
+    fhr = float(60.0 / float(np.mean(ibi)))
+    return ibi, fhr
+
+
+def extract_heart_features(ibi):
+    """Extract comprehensive heart rate features from inter-beat intervals"""
+    if ibi is None or len(ibi) < 3:
+        return None
+
+    fhr_series = 60.0 / ibi
+
+    mean_ibi = float(np.mean(ibi))
+    std_ibi = float(np.std(ibi))
+    rmssd = float(np.sqrt(np.mean(np.diff(ibi) ** 2)))
+    cv = float(std_ibi / mean_ibi) if mean_ibi != 0 else float('nan')
+
+    features = {
+        # Rhythm features
+        "mean_ibi": mean_ibi,
+        "sdnn": std_ibi,
+        "rmssd": rmssd,
+        "cv": cv,
+        "ibi_skewness": float(skew(ibi)),
+        "abnormal_beats": int(np.sum((ibi < 0.3) | (ibi > 1.2))),
+
+        # FHR features
+        "mean_fhr": float(np.mean(fhr_series)),
+        "median_fhr": float(np.median(fhr_series)),
+        "min_fhr": float(np.min(fhr_series)),
+        "max_fhr": float(np.max(fhr_series)),
+        "fhr_range": float(np.max(fhr_series) - np.min(fhr_series)),
+        "short_term_variability": float(np.std(fhr_series))
+    }
+
+    return features
+
+
+def get_beat_analysis(peaks, sr):
+    """Get detailed beat timing analysis"""
+    beat_times = peaks / sr
+    beat_numbers = np.arange(1, len(beat_times) + 1)
+    intervals = np.diff(beat_times)
+    
+    return {
+        "beat_count": len(beat_times),
+        "beat_times": beat_times.tolist(),
+        "beat_numbers": beat_numbers.tolist(),
+        "beat_intervals": intervals.tolist()
+    }
 
 
 # ============================================================================
@@ -161,17 +242,21 @@ class ONNXPredictor:
         
         return feature
     
-    def predict_file(self, audio_path):
+    def predict_file(self, audio_path, include_heart_analysis=True):
         """
         Make prediction on a single audio file
         
         Args:
             audio_path: Path to audio file
+            include_heart_analysis: Whether to include heart rate analysis
             
         Returns:
-            Dictionary with prediction results
+            Dictionary with prediction results and heart rate features
         """
-        # Extract features
+        # Read audio for heart rate analysis
+        audio, sr = read_audio(audio_path, filter=True)
+        
+        # Extract features for model prediction
         feature = self.extract_features(audio_path)
         
         # Prepare input (add batch dimension)
@@ -186,7 +271,7 @@ class ONNXPredictor:
         predicted_class = np.argmax(probabilities)
         confidence = probabilities[predicted_class]
         
-        return {
+        result = {
             'file': Path(audio_path).name,
             'predicted_class': int(predicted_class),
             'predicted_label': self.class_labels[predicted_class],
@@ -196,6 +281,42 @@ class ONNXPredictor:
                 for i in range(len(self.class_labels))
             }
         }
+        
+        # Add heart rate analysis if requested
+        if include_heart_analysis:
+            try:
+                # Extract envelope and detect peaks
+                envelope = extract_envelope(audio)
+                peaks = detect_peaks(envelope, sr)
+                
+                # Compute FHR and extract features
+                ibi, fhr = compute_fhr(peaks, sr)
+                
+                if fhr is not None:
+                    result['heart_rate'] = {
+                        'average_fhr': fhr,
+                        'beat_count': len(peaks)
+                    }
+                    
+                    # Extract detailed features
+                    heart_features = extract_heart_features(ibi)
+                    if heart_features:
+                        result['heart_rate'].update(heart_features)
+                    
+                    # Add beat analysis (optional, can be large)
+                    # beat_analysis = get_beat_analysis(peaks, sr)
+                    # result['beat_analysis'] = beat_analysis
+                else:
+                    result['heart_rate'] = {
+                        'error': 'Insufficient beats detected for heart rate analysis'
+                    }
+                    
+            except Exception as e:
+                result['heart_rate'] = {
+                    'error': f'Heart rate analysis failed: {str(e)}'
+                }
+        
+        return result
     
     def predict_batch(self, audio_paths, output_csv=None):
         """
