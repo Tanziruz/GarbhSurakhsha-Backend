@@ -5,7 +5,7 @@ import requests
 import json
 from pathlib import Path
 
-BASE_URL = "https://garbhsurakhsha.up.railway.app/"
+BASE_URL = "https://garbhsurakhsha.up.railway.app"
 
 def test_health_check():
     """Test the health check endpoint"""

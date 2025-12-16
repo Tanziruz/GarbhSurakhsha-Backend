@@ -15,10 +15,6 @@ from scipy.signal import butter, lfilter
 
 EPS = 1E-8
 
-# ============================================================================
-# Audio Processing Functions
-# ============================================================================
-
 def butter_highpass(cutoff, fs, order=5):
     nyq = 0.5 * fs
     normal_cutoff = cutoff / nyq

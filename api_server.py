@@ -168,10 +168,14 @@ if __name__ == "__main__":
         print("The server will start but /analyze endpoint will not work.")
         print("Please check the error messages above.\n")
 
+    # Get port from environment variable (Railway uses $PORT)
+    port = int(os.environ.get("PORT", 8000))
+    print(f"Starting server on port: {port}")
+    
     uvicorn.run(
         app,
         host="0.0.0.0",
-        port=8000,
+        port=port,
         log_level="info"
     )
 
