@@ -418,7 +418,7 @@ class ONNXPredictor:
         self.output_name = self.session.get_outputs()[0].name
         self.input_shape = self.session.get_inputs()[0].shape
         
-        # Default config
+        
         if config is None:
             config = {
                 'in_channel': 3,

@@ -72,6 +72,11 @@ def test_analyze_audio(audio_file="a0001.wav", gestation_period="24 weeks"):
             print(f"Status: {result['status']}")
             print(f"\nMessage: {result['message']}")
             print(f"\nRecommendation: {result['recommendation']}")
+
+            print("="*70)
+            print("="*70)
+
+            print(result)
             
             # Probabilities
             print(f"\nProbabilities:")
